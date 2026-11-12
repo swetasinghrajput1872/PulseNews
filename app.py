@@ -1,24 +1,28 @@
 
 
 import streamlit as st
-import urllib.request
+import requests
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from datetime import datetime
-from html import escape
-import time
+from zoneinfo import ZoneInfo
 
-# ---------------- PAGE CONFIG ----------------
+# =====================================
+# PAGE CONFIGURATION
+# =====================================
 
 st.set_page_config(
-    page_title="PulseNews - Live News Aggregator",
+    page_title="PulseNews | Live News",
     page_icon="📰",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-# ---------------- NEWS CATEGORIES ----------------
+# =====================================
+# NEWS CATEGORIES
+# =====================================
 
-categories = {
+CATEGORIES = {
     "🔥 Top Stories":
         "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en",
 
@@ -32,7 +36,9 @@ categories = {
         "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en"
 }
 
-# ---------------- CUSTOM CSS ----------------
+# =====================================
+# CUSTOM DESIGN
+# =====================================
 
 st.markdown("""
 <style>
@@ -42,26 +48,18 @@ st.markdown("""
     color: #f8fafc;
 }
 
-header {
-    background-color: #0f172a !important;
+header[data-testid="stHeader"] {
+    background-color: #0f172a;
 }
 
 h1, h2, h3, p, label {
     color: #f8fafc;
 }
 
-.news-card {
-    background-color: #1e293b;
-    padding: 20px;
-    border-radius: 12px;
-    margin-bottom: 15px;
-    border: 1px solid #334155;
-}
-
-.news-title {
+.news-heading {
+    font-size: 19px;
+    font-weight: 700;
     color: #f8fafc;
-    font-size: 18px;
-    font-weight: bold;
     line-height: 1.5;
 }
 
@@ -70,13 +68,19 @@ h1, h2, h3, p, label {
     font-size: 13px;
 }
 
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    background-color: #1e293b;
+    border-radius: 12px;
+    border-color: #334155;
+}
+
 .stButton button {
     background-color: #2563eb;
     color: white;
-    border-radius: 8px;
+    border-radius: 9px;
     border: none;
-    font-weight: bold;
     height: 45px;
+    font-weight: bold;
 }
 
 .stButton button:hover {
@@ -84,10 +88,16 @@ h1, h2, h3, p, label {
     color: white;
 }
 
+a {
+    color: #60a5fa !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- HEADER ----------------
+# =====================================
+# HEADER
+# =====================================
 
 st.title("📰 PulseNews Live")
 
@@ -95,10 +105,12 @@ st.caption("Your Daily Dose of Live News")
 
 st.divider()
 
-# ---------------- SESSION STATE ----------------
+# =====================================
+# SESSION STATE
+# =====================================
 
-if "news_list" not in st.session_state:
-    st.session_state.news_list = []
+if "news" not in st.session_state:
+    st.session_state.news = []
 
 if "loaded_category" not in st.session_state:
     st.session_state.loaded_category = None
@@ -106,30 +118,32 @@ if "loaded_category" not in st.session_state:
 if "last_updated" not in st.session_state:
     st.session_state.last_updated = None
 
-# ---------------- FETCH NEWS FUNCTION ----------------
+if "fetch_error" not in st.session_state:
+    st.session_state.fetch_error = None
 
-def fetch_news(url):
+# =====================================
+# NEWS FETCH FUNCTION
+# =====================================
 
-    # New request on every button click
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0",
-            "Cache-Control": "no-cache",
-            "Pragma": "no-cache"
-        }
+def fetch_latest_news(feed_url):
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 PulseNews/1.0",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache"
+    }
+
+    response = requests.get(
+        feed_url,
+        headers=headers,
+        timeout=25
     )
 
-    with urllib.request.urlopen(
-        request,
-        timeout=25
-    ) as response:
+    response.raise_for_status()
 
-        xml_data = response.read()
+    root = ET.fromstring(response.content)
 
-    root = ET.fromstring(xml_data)
-
-    news_list = []
+    news_items = []
 
     for item in root.findall(".//item"):
 
@@ -140,42 +154,53 @@ def fetch_news(url):
         if not title:
             continue
 
-        # Format published date
         try:
-            published_date = parsedate_to_datetime(
-                pub_date
-            ).strftime("%d %b %Y, %I:%M %p")
+            published = parsedate_to_datetime(pub_date)
 
-        except Exception:
-            published_date = "Date unavailable"
+            published = published.strftime(
+                "%d %b %Y, %I:%M %p"
+            )
 
-        news_list.append({
+        except (TypeError, ValueError, OverflowError):
+            published = "Date unavailable"
+
+        news_items.append({
             "title": title,
             "link": link,
-            "date": published_date
+            "date": published
         })
 
-        if len(news_list) >= 15:
+        if len(news_items) == 15:
             break
 
-    return news_list
+    return news_items
 
-
-# ---------------- CATEGORY SELECTION ----------------
+# =====================================
+# CATEGORY SELECTION
+# =====================================
 
 st.subheader("📂 Select News Category")
 
 selected_category = st.selectbox(
-    "Choose your preferred news category",
-    list(categories.keys())
+    "Choose your preferred category",
+    options=list(CATEGORIES.keys()),
+    key="category_select"
 )
 
-# ---------------- FETCH BUTTON ----------------
+# =====================================
+# FETCH BUTTON
+# =====================================
 
 if st.button(
     "🔄 Fetch Latest News",
-    use_container_width=True
+    use_container_width=True,
+    type="primary"
 ):
+
+    # Clear previous results immediately
+    st.session_state.news = []
+    st.session_state.loaded_category = selected_category
+    st.session_state.fetch_error = None
 
     try:
 
@@ -183,46 +208,38 @@ if st.button(
             f"Fetching latest {selected_category} news..."
         ):
 
-            # Fetch selected category fresh
-            fresh_news = fetch_news(
-                categories[selected_category]
+            new_news = fetch_latest_news(
+                CATEGORIES[selected_category]
             )
 
-            # Replace previous news
-            st.session_state.news_list = fresh_news
+            st.session_state.news = new_news
 
-            st.session_state.loaded_category = (
-                selected_category
-            )
+            st.session_state.last_updated = datetime.now(
+                ZoneInfo("Asia/Kolkata")
+            ).strftime("%d %b %Y, %I:%M:%S %p")
 
-            st.session_state.last_updated = (
-                datetime.now().strftime(
-                    "%d %b %Y, %I:%M:%S %p"
-                )
-            )
+    except requests.RequestException as error:
 
-        if fresh_news:
-            st.success(
-                f"Loaded {len(fresh_news)} headlines successfully!"
-            )
-        else:
-            st.warning(
-                "No news available in this category right now."
-            )
-
-    except Exception as e:
-
-        st.session_state.news_list = []
-        st.session_state.loaded_category = selected_category
-
-        st.error(
-            "Unable to fetch news. Please check your internet connection and try again."
+        st.session_state.fetch_error = (
+            "Network error. Please check your internet connection "
+            "and try again."
         )
 
-        st.caption(f"Technical details: {e}")
+    except ET.ParseError:
 
+        st.session_state.fetch_error = (
+            "Unable to read the news feed. Please try again."
+        )
 
-# ---------------- DISPLAY NEWS ----------------
+    except Exception as error:
+
+        st.session_state.fetch_error = (
+            f"Something went wrong: {error}"
+        )
+
+# =====================================
+# DISPLAY NEWS
+# =====================================
 
 if st.session_state.loaded_category == selected_category:
 
@@ -238,71 +255,56 @@ if st.session_state.loaded_category == selected_category:
             f"🕒 Last Updated: {st.session_state.last_updated}"
         )
 
-    news_list = st.session_state.news_list
+    if st.session_state.fetch_error:
 
-    if news_list:
+        st.error(st.session_state.fetch_error)
 
-        for index, news in enumerate(
-            news_list,
+    elif st.session_state.news:
+
+        st.success(
+            f"Loaded {len(st.session_state.news)} headlines successfully!"
+        )
+
+        for number, news in enumerate(
+            st.session_state.news,
             start=1
         ):
 
-            safe_title = escape(news["title"])
-            safe_date = escape(news["date"])
+            with st.container(border=True):
 
-            safe_link = escape(
-                news["link"] or "",
-                quote=True
-            )
+                st.markdown(
+                    f"**{number}. {news['title']}**"
+                )
 
-            st.markdown(
-                f"""
-                <div class="news-card">
+                st.caption(
+                    f"🕒 Published: {news['date']}"
+                )
 
-                    <div class="news-title">
-                        {index}. {safe_title}
-                    </div>
-
-                    <p class="news-date">
-                        🕒 Published: {safe_date}
-                    </p>
-
-                    <a href="{safe_link}"
-                       target="_blank"
-                       rel="noopener noreferrer">
-                       Read Full Article ↗
-                    </a>
-
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+                if news["link"]:
+                    st.link_button(
+                        "🔗 Read Full Article",
+                        news["link"]
+                    )
 
     else:
 
-        st.info(
-            "No headlines found. Please try again later."
+        st.warning(
+            "No headlines available right now."
         )
 
 else:
 
     st.info(
-        "Select a category and click Fetch Latest News."
+        "Select a news category and click Fetch Latest News."
     )
 
-
-# ---------------- FOOTER ----------------
+# =====================================
+# FOOTER
+# =====================================
 
 st.divider()
 
-st.markdown(
-    """
-    <center>
-        <p style="color:#94a3b8;">
-            © 2026 PulseNews | Powered by Google News RSS
-        </p>
-    </center>
-    """,
-    unsafe_allow_html=True
+st.caption(
+    "© 2026 PulseNews | Powered by Google News RSS"
 )
 
