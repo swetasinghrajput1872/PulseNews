@@ -1,7 +1,9 @@
 
+
 import streamlit as st
 import urllib.request
 import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 
 # Page configuration
 st.set_page_config(
@@ -12,10 +14,17 @@ st.set_page_config(
 
 # News categories
 categories = {
-    "🔥 Top Stories": "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en",
-    "💻 Technology": "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-IN&gl=IN&ceid=IN:en",
-    "💼 Business": "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-IN&gl=IN&ceid=IN:en",
-    "⚽ Sports": "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en"
+    "🔥 Top Stories":
+        "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en",
+
+    "💻 Technology":
+        "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-IN&gl=IN&ceid=IN:en",
+
+    "💼 Business":
+        "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-IN&gl=IN&ceid=IN:en",
+
+    "⚽ Sports":
+        "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-IN&gl=IN&ceid=IN:en"
 }
 
 # Custom CSS
@@ -25,18 +34,15 @@ st.markdown("""
     background-color: #0f172a;
     color: #f8fafc;
 }
-
 h1, h2, h3, p, label {
-    color: #f8fafc !important;
+    color: #f8fafc;
 }
-
 .news-card {
     background-color: #1e293b;
     padding: 18px;
     border-radius: 12px;
     margin-bottom: 12px;
 }
-
 .stButton button {
     background-color: #2563eb;
     color: white;
@@ -55,6 +61,13 @@ st.markdown(
 
 st.write("---")
 
+# Session state
+if "news_list" not in st.session_state:
+    st.session_state.news_list = []
+
+if "loaded_category" not in st.session_state:
+    st.session_state.loaded_category = None
+
 # Category selection
 selected_category = st.selectbox(
     "📂 Select News Category",
@@ -62,8 +75,8 @@ selected_category = st.selectbox(
 )
 
 # Fetch news function
-@st.cache_data(ttl=300)
 def fetch_news(url):
+
     request = urllib.request.Request(
         url,
         headers={"User-Agent": "Mozilla/5.0"}
@@ -77,54 +90,89 @@ def fetch_news(url):
     news_list = []
 
     for item in root.findall(".//item")[:15]:
+
         title = item.findtext("title")
         link = item.findtext("link")
+        pub_date = item.findtext("pubDate")
 
         if title:
+            try:
+                date = parsedate_to_datetime(
+                    pub_date
+                ).strftime("%d %b %Y, %I:%M %p") if pub_date else "Date unavailable"
+            except Exception:
+                date = "Date unavailable"
+
             news_list.append({
                 "title": title,
-                "link": link
+                "link": link,
+                "date": date
             })
 
     return news_list
 
 
-# Refresh button
+# Fetch Latest News button
 if st.button("🔄 Fetch Latest News", use_container_width=True):
-    fetch_news.clear()
 
-# Display news
-try:
-    with st.spinner("Fetching latest headlines..."):
+    try:
+        with st.spinner("Fetching latest headlines..."):
 
-        news_list = fetch_news(
-            categories[selected_category]
-        )
-
-    st.success(
-        f"Loaded {len(news_list)} headlines successfully!"
-    )
-
-    for index, news in enumerate(news_list, start=1):
-
-        with st.container(border=True):
-
-            st.markdown(
-                f"### {index}. {news['title']}"
+            # Fetch selected category only
+            news_list = fetch_news(
+                categories[selected_category]
             )
 
-            if news["link"]:
-                st.link_button(
-                    "Read Full Story ↗",
-                    news["link"]
+            st.session_state.news_list = news_list
+            st.session_state.loaded_category = selected_category
+
+    except Exception as e:
+        st.session_state.news_list = []
+        st.session_state.loaded_category = selected_category
+        st.error(f"Unable to fetch news: {e}")
+
+
+# Display news
+if st.session_state.loaded_category == selected_category:
+
+    news_list = st.session_state.news_list
+
+    st.write("---")
+
+    st.subheader(
+        f"📰 Latest News - {selected_category}"
+    )
+
+    if news_list:
+
+        st.success(
+            f"Loaded {len(news_list)} headlines successfully!"
+        )
+
+        for index, news in enumerate(news_list, start=1):
+
+            with st.container(border=True):
+
+                st.markdown(
+                    f"### {index}. {news['title']}"
                 )
 
-    if not news_list:
+                st.caption(
+                    f"🕒 Published: {news['date']}"
+                )
+
+                if news["link"]:
+                    st.link_button(
+                        "Read Full Story ↗",
+                        news["link"]
+                    )
+
+    else:
         st.warning("No headlines available right now.")
 
-except Exception:
-    st.error(
-        "Unable to fetch news. Please check your internet connection."
+else:
+    st.info(
+        "Select a category and click Fetch Latest News."
     )
 
 # Footer
